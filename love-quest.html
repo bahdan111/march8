@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Love Quest</title>
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Nunito', 'Comfortaa', sans-serif;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+canvas {
+  display: block;
+  max-width: 100vw;
+  max-height: 100vh;
+  cursor: pointer;
+}
+#overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s;
+  background: rgba(0,0,0,0.3);
+}
+#overlay.visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+.card {
+  background: rgba(255,255,255,0.95);
+  border-radius: 24px;
+  padding: 40px 50px;
+  max-width: 520px;
+  text-align: center;
+  box-shadow: 0 12px 50px rgba(0,0,0,0.3);
+  transform: scale(0.9);
+  transition: transform 0.4s;
+}
+#overlay.visible .card {
+  transform: scale(1);
+}
+.card h2 {
+  font-family: 'Comfortaa', 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 30px;
+  margin-bottom: 12px;
+  color: #e75480;
+}
+.card p {
+  font-size: 18px;
+  color: #555;
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.card .sub {
+  font-size: 14px;
+  color: #999;
+}
+.card .btn {
+  display: inline-block;
+  padding: 14px 36px;
+  background: #e75480;
+  color: white;
+  border: none;
+  border-radius: 25px;
+  font-size: 17px;
+  font-family: 'Nunito', 'Comfortaa', sans-serif;
+  cursor: pointer;
+  transition: transform 0.2s, background 0.2s;
+  margin-top: 10px;
+}
+.card .btn:hover {
+  transform: scale(1.05);
+  background: #d63e6c;
+}
+.final-messages p {
+  margin: 8px 0;
+  font-style: italic;
+  color: #777;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<div id="overlay"><div class="card" id="card"></div></div>
+
+<script>
+// ===================== CORE ENGINE =====================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const cardEl = document.getElementById('card');
+
+const W = 800, H = 500;
+canvas.width = W;
+canvas.height = H;
+
+function resize() {
+  const r = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width = (W * r) + 'px';
+  canvas.style.height = (H * r) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Input
+let mouseX = 0, mouseY = 0;
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return {
+    x: (t.clientX - rect.left) * (W / rect.width),
+    y: (t.clientY - rect.top) * (H / rect.height)
+  };
+}
+canvas.addEventListener('mousemove', e => { const p = getPos(e); mouseX = p.x; mouseY = p.y; });
+canvas.addEventListener('touchmove', e => { e.preventDefault(); const p = getPos(e); mouseX = p.x; mouseY = p.y; }, { passive: false });
+
+let clickHandler = null;
+canvas.addEventListener('mousedown', e => { const p = getPos(e); if (clickHandler) clickHandler(p.x, p.y); });
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const p = getPos(e);
+  mouseX = p.x; mouseY = p.y;
+  if (clickHandler) clickHandler(p.x, p.y);
+}, { passive: false });
+
+// Particles
+let particles = [];
+function spawnParticles(x, y, color, count = 10) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 7,
+      vy: (Math.random() - 0.5) * 7,
+      life: 1,
+      color,
+      size: Math.random() * 4 + 2,
+    });
+  }
+}
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.1;
+    p.life -= 0.025;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Draw bublichka
+function drawBublichka(x, y, scale = 1, facing = 1) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  // Body
+  ctx.fillStyle = '#daa520';
+  ctx.beginPath();
+  ctx.arc(0, 0, 18, 0, Math.PI * 2);
+  ctx.fill();
+  // Shading
+  ctx.fillStyle = 'rgba(139, 90, 43, 0.25)';
+  ctx.beginPath();
+  ctx.arc(3, 3, 16, 0, Math.PI * 2);
+  ctx.fill();
+  // Main color
+  ctx.fillStyle = '#daa520';
+  ctx.beginPath();
+  ctx.arc(0, 0, 16, 0, Math.PI * 2);
+  ctx.fill();
+  // Hole
+  ctx.fillStyle = '#b8860b';
+  ctx.beginPath();
+  ctx.arc(0, 1, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // Highlight
+  ctx.fillStyle = '#f0c040';
+  ctx.beginPath();
+  ctx.arc(-2, -5, 10, -Math.PI, 0);
+  ctx.fill();
+  // Eyes
+  const ex = facing * 3;
+  ctx.fillStyle = '#2c1810';
+  ctx.beginPath(); ctx.arc(ex - 5, -4, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(ex + 5, -4, 2.5, 0, Math.PI * 2); ctx.fill();
+  // Eye shine
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(ex - 4, -5, 1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(ex + 6, -5, 1, 0, Math.PI * 2); ctx.fill();
+  // Smile
+  ctx.strokeStyle = '#2c1810';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(ex, -1, 4, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+  // Cheeks
+  ctx.fillStyle = 'rgba(255, 150, 150, 0.5)';
+  ctx.beginPath(); ctx.arc(ex - 8, 0, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(ex + 8, 0, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// Draw gradient background
+function drawBg(c1, c2) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, c1);
+  g.addColorStop(1, c2);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// Overlay
+function showCard(title, message, btnText, cb) {
+  overlay.classList.add('visible');
+  cardEl.innerHTML = `
+    <h2>${title}</h2>
+    <p>"${message}"</p>
+    <button class="btn" id="card-btn">${btnText}</button>
+  `;
+  document.getElementById('card-btn').onclick = () => {
+    overlay.classList.remove('visible');
+    setTimeout(cb, 400);
+  };
+}
+
+// Level config
+const levelMessages = [
+  { name: "Morning Garden", msg: "It always better to wake up with you!" },
+  { name: "Chocolate Factory", msg: "You are my favourite sweet treat!" },
+  { name: "Starry Night", msg: "I'll always try to be your safe place" },
+  { name: "Path to You", msg: "Happy March 8th! I love you missis Pupichka" },
+];
+
+// Game state
+let currentGame = null;
+let state = 'start';
+let allMessages = [];
+
+// Draw level title + progress
+function drawHUD(title, progress) {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  const tw = ctx.measureText(title).width;
+  ctx.fillRect(10, 10, Math.max(tw + 20, 160), 32);
+  ctx.fillStyle = '#fff';
+  ctx.font = '15px Comfortaa';
+  ctx.fillText(title, 20, 30);
+  if (progress) {
+    ctx.fillText(progress, W - 80, 30);
+  }
+}
+
+// ===================== LEVEL 1: MAZE =====================
+function createMaze() {
+  const cols = 13, rows = 9;
+  const cellW = Math.floor((W - 40) / cols);
+  const cellH = Math.floor((H - 60) / rows);
+  const offX = (W - cols * cellW) / 2;
+  const offY = 45;
+
+  // Generate maze using recursive backtracking
+  const grid = [];
+  for (let r = 0; r < rows; r++) {
+    grid[r] = [];
+    for (let c = 0; c < cols; c++) {
+      grid[r][c] = { top: true, right: true, bottom: true, left: true, visited: false };
+    }
+  }
+
+  function carve(r, c) {
+    grid[r][c].visited = true;
+    const dirs = [[0,1,'right','left'],[0,-1,'left','right'],[1,0,'bottom','top'],[-1,0,'top','bottom']];
+    dirs.sort(() => Math.random() - 0.5);
+    for (const [dr, dc, wall, opp] of dirs) {
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !grid[nr][nc].visited) {
+        grid[r][c][wall] = false;
+        grid[nr][nc][opp] = false;
+        carve(nr, nc);
+      }
+    }
+  }
+  carve(0, 0);
+
+  // Place flowers at interesting positions
+  const flowerCells = [];
+  const candidates = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (r === 0 && c === 0) continue;
+      if (r === rows - 1 && c === cols - 1) continue;
+      candidates.push([r, c]);
+    }
+  }
+  candidates.sort(() => Math.random() - 0.5);
+  for (let i = 0; i < 5 && i < candidates.length; i++) {
+    flowerCells.push({ r: candidates[i][0], c: candidates[i][1], collected: false });
+  }
+
+  // Player position
+  let pr = 0, pc = 0;
+  let targetR = 0, targetC = 0;
+  let animProgress = 1;
+  let collected = 0;
+  let exitOpen = false;
+  let lastFacing = 1;
+
+  // Keyboard input for maze
+  const mazeKeys = { up: false, down: false, left: false, right: false };
+  let mazeKeyQueue = [];
+
+  function mazeKeyDown(e) {
+    let dir = null;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dir = 'up';
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dir = 'down';
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dir = 'left';
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dir = 'right';
+    if (dir) {
+      e.preventDefault();
+      mazeKeys[dir] = true;
+      mazeKeyQueue.push(dir);
+    }
+  }
+  function mazeKeyUp(e) {
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') mazeKeys.up = false;
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') mazeKeys.down = false;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') mazeKeys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') mazeKeys.right = false;
+  }
+  document.addEventListener('keydown', mazeKeyDown);
+  document.addEventListener('keyup', mazeKeyUp);
+
+  function tryMove(dir) {
+    const cell = grid[pr][pc];
+    let dr = 0, dc = 0, wall = '';
+    if (dir === 'up') { dr = -1; wall = 'top'; }
+    if (dir === 'down') { dr = 1; wall = 'bottom'; }
+    if (dir === 'left') { dc = -1; wall = 'left'; }
+    if (dir === 'right') { dc = 1; wall = 'right'; }
+    const nr = pr + dr, nc = pc + dc;
+    if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !cell[wall]) {
+      targetR = nr;
+      targetC = nc;
+      animProgress = 0;
+      if (dc !== 0) lastFacing = dc;
+      return true;
+    }
+    return false;
+  }
+
+  function handleClick(mx, my) {
+    // No click movement — use keyboard
+  }
+
+  function cleanup() {
+    document.removeEventListener('keydown', mazeKeyDown);
+    document.removeEventListener('keyup', mazeKeyUp);
+  }
+
+  function update() {
+    if (animProgress < 1) {
+      animProgress = Math.min(1, animProgress + 0.12);
+      if (animProgress >= 1) {
+        pr = targetR;
+        pc = targetC;
+        // Check flower collection
+        for (const f of flowerCells) {
+          if (!f.collected && f.r === pr && f.c === pc) {
+            f.collected = true;
+            collected++;
+            spawnParticles(
+              offX + pc * cellW + cellW / 2,
+              offY + pr * cellH + cellH / 2,
+              '#e91e63', 12
+            );
+            if (collected >= 5) exitOpen = true;
+          }
+        }
+        // Check exit
+        if (exitOpen && pr === rows - 1 && pc === cols - 1) {
+          cleanup();
+          return true;
+        }
+      }
+    }
+
+    // Process keyboard input when not animating
+    if (animProgress >= 1) {
+      // Try queued key first
+      while (mazeKeyQueue.length > 0) {
+        const dir = mazeKeyQueue.shift();
+        if (mazeKeys[dir] && tryMove(dir)) return false;
+      }
+      // Then try held keys
+      if (mazeKeys.up) tryMove('up');
+      else if (mazeKeys.down) tryMove('down');
+      else if (mazeKeys.left) tryMove('left');
+      else if (mazeKeys.right) tryMove('right');
+    }
+    return false;
+  }
+
+  function draw() {
+    drawBg('#c8e6c9', '#fff9c4');
+
+    // Draw maze
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = offX + c * cellW;
+        const y = offY + r * cellH;
+        const cell = grid[r][c];
+
+        // Floor
+        ctx.fillStyle = '#e8f5e9';
+        ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+
+        // Walls
+        ctx.strokeStyle = '#388e3c';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        if (cell.top) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + cellW, y); ctx.stroke(); }
+        if (cell.bottom) { ctx.beginPath(); ctx.moveTo(x, y + cellH); ctx.lineTo(x + cellW, y + cellH); ctx.stroke(); }
+        if (cell.left) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + cellH); ctx.stroke(); }
+        if (cell.right) { ctx.beginPath(); ctx.moveTo(x + cellW, y); ctx.lineTo(x + cellW, y + cellH); ctx.stroke(); }
+      }
+    }
+
+    // Exit marker
+    if (exitOpen) {
+      const ex = offX + (cols - 1) * cellW + cellW / 2;
+      const ey = offY + (rows - 1) * cellH + cellH / 2;
+      ctx.fillStyle = 'rgba(255, 215, 0, ' + (0.3 + 0.2 * Math.sin(performance.now() * 0.005)) + ')';
+      ctx.beginPath();
+      ctx.arc(ex, ey, cellW * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#333';
+      ctx.font = '12px Comfortaa';
+      ctx.textAlign = 'center';
+      ctx.fillText('EXIT', ex, ey + 4);
+      ctx.textAlign = 'left';
+    }
+
+    // Flowers
+    for (const f of flowerCells) {
+      if (f.collected) continue;
+      const fx = offX + f.c * cellW + cellW / 2;
+      const fy = offY + f.r * cellH + cellH / 2;
+      const t = performance.now() * 0.003;
+      ctx.save();
+      ctx.translate(fx, fy);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + t;
+        ctx.fillStyle = '#e91e63';
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * 7, Math.sin(a) * 7, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffeb3b';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Player
+    const lerpR = pr + (targetR - pr) * Math.min(animProgress, 1);
+    const lerpC = pc + (targetC - pc) * Math.min(animProgress, 1);
+    const px = offX + lerpC * cellW + cellW / 2;
+    const py = offY + lerpR * cellH + cellH / 2;
+    drawBublichka(px, py, cellW / 50, lastFacing);
+
+    drawParticles();
+    drawHUD('Morning Garden', collected + '/5 flowers');
+
+    // Controls hint
+    if (collected === 0 && animProgress >= 1 && pr === 0 && pc === 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.font = '13px Comfortaa';
+      ctx.textAlign = 'center';
+      ctx.fillText('Use WASD or Arrow Keys to move', W / 2, H - 15);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  return { handleClick, update, draw, cleanup };
+}
+
+// ===================== LEVEL 2: CATCHER =====================
+function createCatcher() {
+  let bx = W / 2;
+  let caught = 0;
+  let shakeTimer = 0;
+  const needed = 10;
+  let items = [];
+  let spawnTimer = 0;
+  let speed = 2;
+  let time = 0;
+  const catcherSpeed = 6;
+
+  // Keyboard input
+  const catcherKeys = { left: false, right: false };
+  function catcherKeyDown(e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { catcherKeys.left = true; e.preventDefault(); }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { catcherKeys.right = true; e.preventDefault(); }
+  }
+  function catcherKeyUp(e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') catcherKeys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') catcherKeys.right = false;
+  }
+  document.addEventListener('keydown', catcherKeyDown);
+  document.addEventListener('keyup', catcherKeyUp);
+
+  function cleanup() {
+    document.removeEventListener('keydown', catcherKeyDown);
+    document.removeEventListener('keyup', catcherKeyUp);
+  }
+
+  function spawnItem() {
+    const isLemon = Math.random() < 0.25;
+    items.push({
+      x: Math.random() * (W - 80) + 40,
+      y: -30,
+      type: isLemon ? 'lemon' : (Math.random() < 0.5 ? 'chocolate' : 'cupcake'),
+      vy: speed + Math.random() * 0.5,
+      rot: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function handleClick(mx, my) {
+    // Not needed — arrow keys drive movement
+  }
+
+  function update() {
+    time++;
+    if (catcherKeys.left) bx -= catcherSpeed;
+    if (catcherKeys.right) bx += catcherSpeed;
+    bx = Math.max(30, Math.min(W - 30, bx));
+
+    speed = 2 + time * 0.001;
+    spawnTimer++;
+    if (spawnTimer > Math.max(20, 45 - time * 0.02)) {
+      spawnItem();
+      spawnTimer = 0;
+    }
+
+    if (shakeTimer > 0) shakeTimer--;
+
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      item.y += item.vy;
+      item.rot += 0.03;
+
+      // Catch check
+      if (item.y > H - 80 && item.y < H - 30 && Math.abs(item.x - bx) < 40) {
+        if (item.type === 'lemon') {
+          shakeTimer = 20;
+          spawnParticles(item.x, item.y, '#fdd835', 8);
+        } else {
+          caught++;
+          spawnParticles(item.x, item.y, '#8d6e63', 10);
+        }
+        items.splice(i, 1);
+        if (caught >= needed) { cleanup(); return true; }
+        continue;
+      }
+
+      // Off screen
+      if (item.y > H + 40) {
+        items.splice(i, 1);
+      }
+    }
+    return false;
+  }
+
+  function drawItem(item) {
+    ctx.save();
+    ctx.translate(item.x, item.y);
+    ctx.rotate(item.rot);
+    if (item.type === 'chocolate') {
+      ctx.fillStyle = '#5d4037';
+      ctx.fillRect(-12, -10, 24, 20);
+      ctx.fillStyle = '#8d6e63';
+      ctx.fillRect(-10, -8, 20, 16);
+      ctx.fillStyle = '#e91e63';
+      ctx.fillRect(-1, -10, 2, 20);
+      ctx.fillRect(-12, -1, 24, 2);
+    } else if (item.type === 'cupcake') {
+      // Cup
+      ctx.fillStyle = '#e91e63';
+      ctx.beginPath();
+      ctx.moveTo(-10, 0);
+      ctx.lineTo(-8, 12);
+      ctx.lineTo(8, 12);
+      ctx.lineTo(10, 0);
+      ctx.closePath();
+      ctx.fill();
+      // Top
+      ctx.fillStyle = '#f8bbd0';
+      ctx.beginPath();
+      ctx.arc(0, -2, 12, Math.PI, 0);
+      ctx.fill();
+      // Cherry
+      ctx.fillStyle = '#c62828';
+      ctx.beginPath();
+      ctx.arc(0, -12, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Lemon
+      ctx.fillStyle = '#fdd835';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 14, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#f9a825';
+      ctx.beginPath();
+      ctx.ellipse(2, 0, 10, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Angry face
+      ctx.fillStyle = '#333';
+      ctx.beginPath(); ctx.arc(-4, -2, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(4, -2, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 4, 3, Math.PI, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    drawBg('#f8bbd0', '#8d6e63');
+
+    // Conveyor belt decoration
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.fillRect(0, H - 25, W, 25);
+
+    // Items
+    for (const item of items) drawItem(item);
+
+    // Bublichka with basket
+    const shake = shakeTimer > 0 ? (Math.random() - 0.5) * 6 : 0;
+    ctx.save();
+    ctx.translate(bx + shake, H - 55);
+    // Basket
+    ctx.fillStyle = '#8d6e63';
+    ctx.beginPath();
+    ctx.moveTo(-30, 0);
+    ctx.lineTo(-25, 20);
+    ctx.lineTo(25, 20);
+    ctx.lineTo(30, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#6d4c41';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Basket lines
+    ctx.beginPath();
+    ctx.moveTo(-15, 0); ctx.lineTo(-13, 20);
+    ctx.moveTo(0, 0); ctx.lineTo(0, 20);
+    ctx.moveTo(15, 0); ctx.lineTo(13, 20);
+    ctx.stroke();
+    ctx.restore();
+
+    const facing = catcherKeys.left ? -1 : catcherKeys.right ? 1 : 1;
+    drawBublichka(bx + shake, H - 75, 1, facing);
+
+    drawParticles();
+    drawHUD('Chocolate Factory', caught + '/' + needed);
+  }
+
+  return { handleClick, update, draw, cleanup };
+}
+
+// ===================== LEVEL 3: CONSTELLATIONS =====================
+function createConstellation() {
+  // Define 3 shapes with star positions
+  // Heart: classic two-bump top with pointed bottom
+  const cx1 = 150, cy1 = 200;
+  const shapes = [
+    {
+      name: 'Heart',
+      color: '#ff6b9d',
+      stars: [
+        { x: cx1, y: cy1 + 60 },       // bottom point
+        { x: cx1 - 45, y: cy1 + 25 },   // lower left
+        { x: cx1 - 55, y: cy1 - 15 },   // mid left
+        { x: cx1 - 40, y: cy1 - 45 },   // upper left bump
+        { x: cx1 - 15, y: cy1 - 55 },   // top left peak
+        { x: cx1, y: cy1 - 40 },         // center dip
+        { x: cx1 + 15, y: cy1 - 55 },   // top right peak
+        { x: cx1 + 40, y: cy1 - 45 },   // upper right bump
+        { x: cx1 + 55, y: cy1 - 15 },   // mid right
+        { x: cx1 + 45, y: cy1 + 25 },   // lower right
+      ],
+      completed: false,
+      nextIdx: 0,
+    },
+    {
+      name: 'Star',
+      color: '#ffd54f',
+      stars: [
+        { x: 430, y: 100 }, { x: 450, y: 170 }, { x: 520, y: 185 },
+        { x: 465, y: 230 }, { x: 485, y: 300 }, { x: 430, y: 260 },
+        { x: 375, y: 300 }, { x: 395, y: 230 }, { x: 340, y: 185 },
+        { x: 410, y: 170 },
+      ],
+      completed: false,
+      nextIdx: 0,
+    },
+    {
+      // Flower: 5 wide rounded petals — each petal has 3 points (left, tip, right) + valley
+      name: 'Flower',
+      color: '#ce93d8',
+      stars: (() => {
+        const fc = { x: 680, y: 200 };
+        const pts = [];
+        const tipR = 70, sideR = 55, valleyR = 22;
+        const n = 5;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+          const spread = Math.PI / n * 0.55;
+          // Left side of petal
+          pts.push({ x: fc.x + Math.cos(a - spread) * sideR, y: fc.y + Math.sin(a - spread) * sideR });
+          // Petal tip
+          pts.push({ x: fc.x + Math.cos(a) * tipR, y: fc.y + Math.sin(a) * tipR });
+          // Right side of petal
+          pts.push({ x: fc.x + Math.cos(a + spread) * sideR, y: fc.y + Math.sin(a + spread) * sideR });
+          // Valley between petals
+          const va = a + Math.PI / n;
+          pts.push({ x: fc.x + Math.cos(va) * valleyR, y: fc.y + Math.sin(va) * valleyR });
+        }
+        return pts;
+      })(),
+      completed: false,
+      nextIdx: 0,
+    },
+  ];
+
+  // Decoy stars
+  const decoys = [];
+  for (let i = 0; i < 25; i++) {
+    decoys.push({
+      x: Math.random() * (W - 60) + 30,
+      y: Math.random() * (H - 80) + 50,
+      r: Math.random() * 1.5 + 1,
+      twinkle: Math.random() * Math.PI * 2,
+    });
+  }
+
+  // Background stars
+  const bgStars = [];
+  for (let i = 0; i < 80; i++) {
+    bgStars.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.3,
+      twinkle: Math.random() * Math.PI * 2,
+    });
+  }
+
+  let hoveredStar = null;
+  let completedCount = 0;
+
+  function findStar(mx, my) {
+    for (const shape of shapes) {
+      if (shape.completed) continue;
+      const idx = shape.nextIdx;
+      const s = shape.stars[idx];
+      if (Math.hypot(mx - s.x, my - s.y) < 20) {
+        return { shape, idx };
+      }
+    }
+    return null;
+  }
+
+  function handleClick(mx, my) {
+    const found = findStar(mx, my);
+    if (!found) return;
+    const { shape, idx } = found;
+    shape.nextIdx++;
+    spawnParticles(shape.stars[idx].x, shape.stars[idx].y, shape.color, 8);
+    if (shape.nextIdx >= shape.stars.length) {
+      shape.completed = true;
+      completedCount++;
+      // Big sparkle for completed shape
+      for (const s of shape.stars) {
+        spawnParticles(s.x, s.y, shape.color, 6);
+      }
+    }
+  }
+
+  function update() {
+    return completedCount >= 3;
+  }
+
+  function draw() {
+    drawBg('#1a237e', '#4a148c');
+
+    const t = performance.now() * 0.002;
+
+    // Background stars
+    for (const s of bgStars) {
+      const alpha = 0.3 + 0.3 * Math.sin(s.twinkle + t);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Decoy stars
+    for (const s of decoys) {
+      const alpha = 0.4 + 0.3 * Math.sin(s.twinkle + t * 0.7);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#aaa';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r + 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Shape labels
+    for (const shape of shapes) {
+      let cx = 0, cy = 0;
+      for (const s of shape.stars) { cx += s.x; cy += s.y; }
+      cx /= shape.stars.length;
+      cy /= shape.stars.length;
+
+      // Draw connected lines
+      ctx.strokeStyle = shape.color;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = shape.color;
+      ctx.shadowBlur = shape.completed ? 15 : 8;
+      for (let i = 0; i < shape.nextIdx - 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(shape.stars[i].x, shape.stars[i].y);
+        ctx.lineTo(shape.stars[i + 1].x, shape.stars[i + 1].y);
+        ctx.stroke();
+      }
+      // Close shape if completed
+      if (shape.completed) {
+        ctx.beginPath();
+        ctx.moveTo(shape.stars[shape.stars.length - 1].x, shape.stars[shape.stars.length - 1].y);
+        ctx.lineTo(shape.stars[0].x, shape.stars[0].y);
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+
+      // Draw stars
+      for (let i = 0; i < shape.stars.length; i++) {
+        const s = shape.stars[i];
+        const isNext = !shape.completed && i === shape.nextIdx;
+        const isConnected = i < shape.nextIdx;
+
+        if (isNext) {
+          // Pulsing hint
+          const pulse = 0.5 + 0.5 * Math.sin(t * 3);
+          ctx.fillStyle = shape.color;
+          ctx.globalAlpha = 0.3 + 0.3 * pulse;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, 14, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+
+        ctx.fillStyle = isConnected || shape.completed ? shape.color : '#ccc';
+        ctx.shadowColor = isConnected ? shape.color : 'transparent';
+        ctx.shadowBlur = isConnected ? 10 : 0;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, isNext ? 6 : 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      // Label
+      ctx.fillStyle = shape.completed ? shape.color : 'rgba(255,255,255,0.4)';
+      ctx.font = '13px Comfortaa';
+      ctx.textAlign = 'center';
+      ctx.fillText(shape.name + (shape.completed ? ' !' : ''), cx, cy - 40);
+    }
+    ctx.textAlign = 'left';
+
+    // Bublichka in corner watching
+    drawBublichka(50, H - 40, 0.8, 1);
+
+    drawParticles();
+    drawHUD('Starry Night', completedCount + '/3 shapes');
+  }
+
+  return { handleClick, update, draw };
+}
+
+// ===================== LEVEL 4: MEMORY MATCH =====================
+function createMemory() {
+  const cols = 4, rows = 3;
+  const cardW = 100, cardH = 120;
+  const gap = 15;
+  const totalW = cols * cardW + (cols - 1) * gap;
+  const totalH = rows * cardH + (rows - 1) * gap;
+  const offX = (W - totalW) / 2;
+  const offY = (H - totalH) / 2 + 10;
+
+  const icons = ['heart', 'flower', 'star', 'chocolate', 'bublichka', 'cupcake'];
+  let deck = [...icons, ...icons];
+  // Shuffle
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+
+  const cards = deck.map((icon, i) => ({
+    icon,
+    col: i % cols,
+    row: Math.floor(i / cols),
+    flipped: false,
+    matched: false,
+    flipAnim: 0, // 0 = face down, 1 = face up
+    flipDir: 0,  // -1 flipping down, 1 flipping up
+  }));
+
+  let selected = [];
+  let matchedPairs = 0;
+  let lockInput = false;
+
+  function handleClick(mx, my) {
+    if (lockInput) return;
+    for (const card of cards) {
+      if (card.matched || card.flipped) continue;
+      const cx = offX + card.col * (cardW + gap);
+      const cy = offY + card.row * (cardH + gap);
+      if (mx >= cx && mx <= cx + cardW && my >= cy && my <= cy + cardH) {
+        card.flipped = true;
+        card.flipDir = 1;
+        selected.push(card);
+        if (selected.length === 2) {
+          lockInput = true;
+          const [a, b] = selected;
+          if (a.icon === b.icon) {
+            setTimeout(() => {
+              a.matched = true;
+              b.matched = true;
+              matchedPairs++;
+              spawnParticles(
+                offX + a.col * (cardW + gap) + cardW / 2,
+                offY + a.row * (cardH + gap) + cardH / 2,
+                '#e91e63', 12
+              );
+              spawnParticles(
+                offX + b.col * (cardW + gap) + cardW / 2,
+                offY + b.row * (cardH + gap) + cardH / 2,
+                '#e91e63', 12
+              );
+              selected = [];
+              lockInput = false;
+            }, 500);
+          } else {
+            setTimeout(() => {
+              a.flipped = false;
+              a.flipDir = -1;
+              b.flipped = false;
+              b.flipDir = -1;
+              selected = [];
+              lockInput = false;
+            }, 800);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  function update() {
+    for (const card of cards) {
+      const target = card.flipped || card.matched ? 1 : 0;
+      card.flipAnim += (target - card.flipAnim) * 0.15;
+    }
+    return matchedPairs >= 6;
+  }
+
+  function drawIcon(icon, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (icon === 'heart') {
+      ctx.fillStyle = '#e91e63';
+      ctx.beginPath();
+      ctx.moveTo(0, 8);
+      ctx.bezierCurveTo(-20, -10, -20, -25, 0, -15);
+      ctx.bezierCurveTo(20, -25, 20, -10, 0, 8);
+      ctx.fill();
+    } else if (icon === 'flower') {
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+        ctx.fillStyle = '#e91e63';
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * 12, Math.sin(a) * 12, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffeb3b';
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (icon === 'star') {
+      ctx.fillStyle = '#ffd54f';
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const r = i % 2 === 0 ? 18 : 8;
+        ctx[i === 0 ? 'moveTo' : 'lineTo'](Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else if (icon === 'chocolate') {
+      ctx.fillStyle = '#5d4037';
+      ctx.fillRect(-14, -12, 28, 24);
+      ctx.fillStyle = '#8d6e63';
+      ctx.fillRect(-12, -10, 24, 20);
+      ctx.fillStyle = '#e91e63';
+      ctx.fillRect(-1, -12, 2, 24);
+      ctx.fillRect(-14, -1, 28, 2);
+    } else if (icon === 'bublichka') {
+      drawBublichka(0, 0, 0.9, 1);
+    } else if (icon === 'cupcake') {
+      ctx.fillStyle = '#e91e63';
+      ctx.beginPath();
+      ctx.moveTo(-12, 2);
+      ctx.lineTo(-10, 16);
+      ctx.lineTo(10, 16);
+      ctx.lineTo(12, 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#f8bbd0';
+      ctx.beginPath();
+      ctx.arc(0, 0, 14, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = '#c62828';
+      ctx.beginPath();
+      ctx.arc(0, -12, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    drawBg('#ff8a65', '#f48fb1');
+
+    for (const card of cards) {
+      const cx = offX + card.col * (cardW + gap);
+      const cy = offY + card.row * (cardH + gap);
+      const flip = card.flipAnim;
+
+      ctx.save();
+      ctx.translate(cx + cardW / 2, cy + cardH / 2);
+
+      // Scale X for flip effect
+      const scaleX = Math.abs(Math.cos(flip * Math.PI));
+      ctx.scale(Math.max(0.01, scaleX), 1);
+
+      if (card.matched) {
+        // Matched card — golden border
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
+        ctx.beginPath();
+        ctx.roundRect(-cardW / 2 - 3, -cardH / 2 - 3, cardW + 6, cardH + 6, 12);
+        ctx.fill();
+      }
+
+      if (flip > 0.5) {
+        // Face up
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 10);
+        ctx.fill();
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        drawIcon(card.icon, 0, 0);
+      } else {
+        // Face down
+        ctx.fillStyle = '#e75480';
+        ctx.beginPath();
+        ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 10);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = 'bold 30px Comfortaa';
+        ctx.textAlign = 'center';
+        ctx.fillText('?', 0, 10);
+        ctx.textAlign = 'left';
+      }
+
+      ctx.restore();
+    }
+
+    // Bublichka watching from the side
+    drawBublichka(35, H - 40, 0.7, 1);
+
+    drawParticles();
+    drawHUD('Path to You', matchedPairs + '/6 pairs');
+  }
+
+  return { handleClick, update, draw };
+}
+
+// ===================== FINAL SCREEN =====================
+let floatingHearts = [];
+function initFloatingHearts() {
+  floatingHearts = [];
+  for (let i = 0; i < 25; i++) {
+    floatingHearts.push({
+      x: Math.random() * W,
+      y: Math.random() * H + H,
+      vy: -(Math.random() * 1.2 + 0.4),
+      vx: (Math.random() - 0.5) * 0.5,
+      size: Math.random() * 12 + 6,
+      alpha: Math.random() * 0.4 + 0.2,
+    });
+  }
+}
+function drawFloatingHearts() {
+  for (const h of floatingHearts) {
+    h.y += h.vy;
+    h.x += h.vx;
+    if (h.y < -30) { h.y = H + 30; h.x = Math.random() * W; }
+    ctx.globalAlpha = h.alpha;
+    ctx.fillStyle = '#e75480';
+    ctx.beginPath();
+    const s = h.size;
+    ctx.moveTo(h.x, h.y + s * 0.3);
+    ctx.bezierCurveTo(h.x - s, h.y - s * 0.4, h.x - s, h.y - s, h.x, h.y - s * 0.5);
+    ctx.bezierCurveTo(h.x + s, h.y - s, h.x + s, h.y - s * 0.4, h.x, h.y + s * 0.3);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ===================== GAME FLOW =====================
+const games = [createMaze, createCatcher, createConstellation, createMemory];
+let currentLevelIdx = 0;
+
+function startLevel(idx) {
+  currentLevelIdx = idx;
+  currentGame = games[idx]();
+  clickHandler = (x, y) => currentGame.handleClick(x, y);
+  state = 'playing';
+  particles = [];
+}
+
+function onLevelComplete() {
+  state = 'transition';
+  clickHandler = null;
+  const info = levelMessages[currentLevelIdx];
+  allMessages.push(info.msg);
+
+  setTimeout(() => {
+    if (currentLevelIdx < 3) {
+      showCard(info.name, info.msg, 'Continue', () => {
+        startLevel(currentLevelIdx + 1);
+      });
+    } else {
+      // Finale
+      overlay.classList.add('visible');
+      let msgs = allMessages.map(m => `<p>"${m}"</p>`).join('');
+      cardEl.innerHTML = `
+        <h2>For You</h2>
+        <div class="final-messages">${msgs}</div>
+        <p style="margin-top:18px;color:#e75480;font-size:20px;">With all my love</p>
+        <button class="btn" id="card-btn">Play Again</button>
+      `;
+      document.getElementById('card-btn').onclick = () => {
+        overlay.classList.remove('visible');
+        setTimeout(showStartScreen, 400);
+      };
+      state = 'finale';
+      initFloatingHearts();
+    }
+  }, 600);
+}
+
+function showStartScreen() {
+  state = 'start';
+  allMessages = [];
+  currentGame = null;
+  clickHandler = null;
+  initFloatingHearts();
+  overlay.classList.add('visible');
+  cardEl.innerHTML = `
+    <h2>Love Quest</h2>
+    <p>4 little adventures await!<br>Help Bublichka on her magical journey.</p>
+    <p class="sub">Click / tap to play</p>
+    <button class="btn" id="card-btn">Start</button>
+  `;
+  document.getElementById('card-btn').onclick = () => {
+    overlay.classList.remove('visible');
+    setTimeout(() => startLevel(0), 400);
+  };
+}
+
+// ===================== GAME LOOP =====================
+function gameLoop() {
+  ctx.clearRect(0, 0, W, H);
+
+  if (state === 'playing' && currentGame) {
+    const done = currentGame.update();
+    currentGame.draw();
+    updateParticles();
+    if (done) onLevelComplete();
+  } else if (state === 'transition' && currentGame) {
+    currentGame.draw();
+    updateParticles();
+    drawParticles();
+  } else if (state === 'start' || state === 'finale') {
+    drawBg('#fce4ec', '#f8bbd0');
+    drawFloatingHearts();
+    drawBublichka(W / 2, H / 2, 1.5, 1);
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+showStartScreen();
+gameLoop();
+</script>
+</body>
+</html>
